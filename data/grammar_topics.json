@@ -1,0 +1,37 @@
+[
+  {
+    "title": "be動詞（現在形）",
+    "description": "I am / You are / He is などのbe動詞の現在形を学習します。",
+    "level": 1,
+    "related_units": ["self_intro"]
+  },
+  {
+    "title": "一般動詞（現在形）",
+    "description": "play, study, like などの一般動詞の現在形を学習します。",
+    "level": 1,
+    "related_units": ["daily_life"]
+  },
+  {
+    "title": "三単現",
+    "description": "三人称単数現在形（三単現）の使い方を学習します。",
+    "level": 2,
+    "related_units": ["grammar_basics"]
+  },
+  {
+    "title": "現在進行形",
+    "description": "be動詞 + 動詞のing形で「〜している」を表す現在進行形を学習します。",
+    "level": 2,
+    "related_units": ["grammar_basics"]
+  }
+]
+
+
+
+
+
+
+
+
+
+
+

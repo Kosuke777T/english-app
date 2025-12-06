@@ -1,0 +1,472 @@
+文法モード v1 でやること（全体像）
+
+DB スキーマ：grammar_topics / grammar_questions / grammar_progress 追加
+
+data/grammar_topics.json, data/grammar_questions.json を用意
+
+JSON→SQLite インポートスクリプト作成
+
+grammar_service 実装（出題・採点・マスター度更新）
+
+PyQt6 文法トレーニングタブ UI 実装
+
+PowerShell＋Here-String でサービス層テスト
+
+アプリにタブとして組み込み
+
+Git コミット & プッシュ
+
+では、順番に細かくいきます。
+
+STEP 1：DBスキーマに文法系テーブル追加
+1-1. grammar_topics / grammar_questions / grammar_progress
+
+やること：
+
+app/services/db.py の init_db() に以下を追加。
+
+Cursor への指示テンプレ
+
+app/services/db.py を修正してください。
+すでに init_db() 関数で words や word_progress などのテーブルを作成していると思います。
+そこに、文法モード用の3テーブルを追加してください。
+
+grammar_topics
+
+grammar_topics(
+  grammar_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  title         TEXT    NOT NULL,   -- 例: "be動詞（現在形）"
+  description   TEXT,               -- 短い説明
+  level         INTEGER,            -- 中1=1, 中2=2, 中3=3
+  related_units TEXT,               -- JSON文字列など（任意）
+  created_at    TEXT
+);
+
+
+grammar_questions
+
+grammar_questions(
+  question_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  grammar_id     INTEGER NOT NULL,   -- FK → grammar_topics
+  question_type  TEXT    NOT NULL,   -- 'mcq' or 'fill'
+  prompt_text    TEXT    NOT NULL,   -- 問題文（日本語または英語）
+  choice1        TEXT,               -- 四択用（mcq のとき）
+  choice2        TEXT,
+  choice3        TEXT,
+  choice4        TEXT,
+  correct_answer TEXT    NOT NULL,   -- 正解（英文など）
+  explanation    TEXT                -- 解説
+);
+
+
+grammar_progress
+
+grammar_progress(
+  user_id        INTEGER NOT NULL,
+  grammar_id     INTEGER NOT NULL,
+  correct_count  INTEGER NOT NULL DEFAULT 0,
+  wrong_count    INTEGER NOT NULL DEFAULT 0,
+  mastery_level  INTEGER NOT NULL DEFAULT 0,  -- 0〜100
+  last_studied_at TEXT,
+  PRIMARY KEY(user_id, grammar_id)
+);
+
+
+既存の init_db() のスタイルに合わせて、
+「存在しなければCREATE、あれば何もしない」形で実装してください。
+
+STEP 2：文法トピック＆問題の JSON を作る
+2-1. data/grammar_topics.json
+
+やること：
+
+まずは数個でOK（be動詞、一般動詞、三単現…など）
+
+例：
+
+[
+  {
+    "title": "be動詞（現在形）",
+    "description": "I am / You are / He is などの文を学ぶ。",
+    "level": 1,
+    "related_units": ["self_intro"]
+  },
+  {
+    "title": "一般動詞（現在形）",
+    "description": "play, like などのふつうの動詞の文。",
+    "level": 1,
+    "related_units": ["hobby", "daily"]
+  }
+]
+
+2-2. data/grammar_questions.json
+
+やること：
+
+各トピックに数問ずつ。
+question_type は 'mcq' or 'fill' に絞る。
+
+例：
+
+[
+  {
+    "grammar_title": "be動詞（現在形）",
+    "question_type": "mcq",
+    "prompt_text": "次の日本語に合う英語を選びなさい：\n「私は中学生です。」",
+    "choice1": "I is a junior high school student.",
+    "choice2": "I am a junior high school student.",
+    "choice3": "I are a junior high school student.",
+    "choice4": "I be a junior high school student.",
+    "correct_answer": "I am a junior high school student.",
+    "explanation": "`I` のときは `am` を使います。"
+  },
+  {
+    "grammar_title": "be動詞（現在形）",
+    "question_type": "fill",
+    "prompt_text": "次の文の ( ) に入る語を答えなさい：\nHe ( ) a student.",
+    "choice1": null,
+    "choice2": null,
+    "choice3": null,
+    "choice4": null,
+    "correct_answer": "is",
+    "explanation": "He には is を使います。"
+  }
+]
+
+
+※ grammar_title で grammar_topics とひも付ける形にしておく。
+
+STEP 3：JSON → SQLite インポートスクリプト
+3-1. scripts/import_grammar_from_json.py
+
+やること：
+
+topics JSON と questions JSON を DB に流し込む。
+
+Cursor への指示テンプレ
+
+scripts/import_grammar_from_json.py を作成してください。
+仕様：
+
+ルートディレクトリに
+data/grammar_topics.json, data/grammar_questions.json がある前提です。
+
+app/services/db.py の接続関数を使って SQLite にアクセスしてください。
+
+処理内容：
+
+grammar_topics.json を読み込み、
+
+title が一致するレコードが grammar_topics に存在しなければ INSERT する。
+
+既に存在する場合はスキップで構いません。
+
+grammar_questions.json を読み込み、
+
+"grammar_title" をキーに grammar_topics から grammar_id を取得する。
+
+対応する grammar_id が見つからない場合はその問題をスキップ（ログに警告）。
+
+grammar_questions に INSERT する。
+
+スクリプトは
+
+python -m scripts.import_grammar_from_json
+
+
+で実行できるようにしてください。
+
+STEP 4：grammar_service 実装（出題＆採点）
+4-1. インターフェースを決める
+
+やること：
+
+app/services/grammar_service.py を作って、最低限：
+
+list_topics() -> List[dict]
+
+get_topic_detail(grammar_id: int) -> dict
+
+get_next_question(user_id: int, grammar_id: int) -> dict
+
+check_answer(user_id: int, question_id: int, user_answer: str) -> dict
+
+を実装。
+
+4-2. マスター度の更新ルール（簡易版）
+
+仕様（そのまま使える形）：
+
+各 grammar_id について、ユーザーごとに以下を持つ：
+
+correct_count
+
+wrong_count
+
+mastery_level（0〜100）
+
+採点時：
+
+正解：
+
+correct_count++
+
+mastery_level += 5（最大100）
+
+不正解：
+
+wrong_count++
+
+mastery_level -= 7（最小0）
+
+last_studied_at を現在時刻に更新。
+
+4-3. 出題方針（単純版）
+
+v1はシンプルでOK：
+
+grammar_id を指定して、そのトピックの問題からランダムに1問出す
+
+将来的には「間違えた問題を優先」など追加できるように
+
+Cursor への指示テンプレ（grammar_service）
+
+app/services/grammar_service.py を実装してください。
+仕様：
+
+DB テーブル：grammar_topics, grammar_questions, grammar_progress を使用します。
+
+関数として以下を実装してください：
+
+list_topics() -> list[dict]
+
+すべての grammar_topics を grammar_id, title, description, level などの dict で返す。
+
+ユーザー別の成績はここでは返さなくても良いです（必要なら後で拡張）。
+
+get_topic_detail(grammar_id: int) -> dict
+
+指定 grammar_id のトピック情報を取得して返す。
+
+get_next_question(user_id: int, grammar_id: int) -> dict
+
+対象トピック（grammar_id）の grammar_questions から1問を選んで返す。
+
+v1 ではとりあえずランダムで構いません。
+
+戻り値は
+
+{
+  "question_id": int,
+  "question_type": "mcq" or "fill",
+  "prompt_text": str,
+  "choices": [str, str, str, str] or None,
+  "correct_answer": str  # UI側では使わないがデバッグ用に付けても良い
+}
+
+
+のような形式にしてください。
+
+check_answer(user_id: int, question_id: int, user_answer: str) -> dict
+
+grammar_questions から question_id に対応する問題を取得する。
+
+correct_answer と user_answer を比較して正誤判定する。
+
+大文字小文字は区別しない。
+
+前後のスペースは無視。
+
+正解・不正解に応じて grammar_progress の
+correct_count, wrong_count, mastery_level, last_studied_at を更新する。
+
+正解時：mastery_level += 5（上限100）
+
+不正解時：mastery_level -= 7（下限0）
+
+戻り値は
+
+{
+  "is_correct": bool,
+  "correct_answer": str,
+  "explanation": str | None,
+  "updated_mastery": int
+}
+
+
+の形式でお願いします。
+
+STEP 5：PyQt6 文法トレーニングタブの実装
+5-1. 文法トピック一覧画面＋練習画面
+
+構成はシンプルに：
+
+左側：トピック一覧（QListWidget or QTableView）
+
+右側：選択中トピックの情報＋問題表示
+
+5-2. 画面の流れ
+
+起動時に list_topics() を呼んで一覧表示
+
+トピックを選んで「この文法で練習」ボタン → 問題出題
+
+問題形式：
+
+question_type == "mcq"：四択ボタン（QRadioButton or QPushButton）
+
+question_type == "fill"：QLineEdit に入力
+
+「答え合わせ」ボタンで check_answer() を呼ぶ：
+
+正誤表示
+
+解説表示
+
+mastery 表示
+
+「次の問題」ボタンで get_next_question() を再度呼ぶ
+
+Cursor への指示テンプレ（UI）
+
+app/ui/grammar_training_tab.py を実装してください。
+仕様：
+
+PyQt6 の QWidget を継承した GrammarTrainingTab クラスを作成します。
+
+コンストラクタで user_id: int を受け取る想定としてください。
+
+画面構成（レイアウト）は、シンプルで良いので以下を満たしてください：
+
+左側：文法トピック一覧（QListWidgetなど）
+
+grammar_service.list_topics() で取得したタイトルを表示
+
+右側上部：選択中トピックのタイトル・説明ラベル
+
+右側中央：問題表示エリア
+
+問題文ラベル（prompt_text）
+
+question_type に応じて：
+
+'mcq'：4つの選択肢ボタン（QRadioButton か QPushButton）
+
+'fill'：QLineEdit（自由入力欄）
+
+右側下部：
+
+「この文法で練習」ボタン（トピック選択後に押す）
+
+「答え合わせ」ボタン
+
+「次の問題」ボタン
+
+判定結果ラベル（正解／不正解）
+
+解説ラベル
+
+マスター度表示ラベル（mastery_level）
+
+挙動：
+
+トピックを選んで「この文法で練習」ボタン押下 →
+grammar_service.get_next_question(user_id, grammar_id) を呼び出して問題を表示。
+
+「答え合わせ」押下時：
+
+'mcq' の場合：選択された選択肢のテキストを user_answer として渡す。
+
+'fill' の場合：入力欄のテキストを user_answer として渡す。
+
+grammar_service.check_answer(user_id, question_id, user_answer) を呼び、
+is_correct, correct_answer, explanation, updated_mastery を受け取って表示する。
+
+「次の問題」押下時：
+
+再び get_next_question を呼び出して新しい問題を表示。
+
+5-3. メインウィンドウへの組み込み
+
+やること：
+
+app/ui/main_window.py に「文法トレーニング」タブを追加
+
+Cursorへの指示テンプレ：
+
+app/ui/main_window.py を修正し、
+既存のタブ（ホーム、単語など）に加えて「文法トレーニング」タブを追加してください。
+仕様：
+
+GrammarTrainingTab をインポートして、
+仮に user_id=1 を渡してインスタンス化してください（ユーザー管理は後で拡張）。
+
+STEP 6：PowerShell＋Here-String で grammar_service テスト
+6-1. トピック一覧＆1問出題テスト
+. .\.venv\Scripts\Activate.ps1
+$code = @'
+from app.services import db, grammar_service
+
+def main() -> None:
+    user_id = 1
+    db.init_db()
+    topics = grammar_service.list_topics()
+    print("topics:", topics)
+    if not topics:
+        print("No topics found.")
+        return
+    g = topics[0]
+    print("use topic:", g)
+    q = grammar_service.get_next_question(user_id, g["grammar_id"])
+    print("question:", q)
+
+if __name__ == "__main__":
+    main()
+'@
+
+python -c "$code"
+
+6-2. check_answer テスト
+$code = @'
+from app.services import db, grammar_service
+
+def main() -> None:
+    user_id = 1
+    db.init_db()
+    topics = grammar_service.list_topics()
+    g = topics[0]
+    q = grammar_service.get_next_question(user_id, g["grammar_id"])
+    print("Q:", q)
+
+    # テスト用にわざと正解を入れてみる
+    result = grammar_service.check_answer(user_id, q["question_id"], q["correct_answer"])
+    print("result:", result)
+
+if __name__ == "__main__":
+    main()
+'@
+
+python -c "$code"
+
+STEP 7：アプリとして一連の流れ確認
+
+python -m scripts.import_grammar_from_json 実行
+
+python -m app.main 実行
+
+「文法トレーニング」タブを開く
+
+トピック選択 → 「この文法で練習」 → 問題が表示されるか
+
+答えを入れて「答え合わせ」 → 正誤判定・解説・マスター度が変化するか
+
+「次の問題」で問題が切り替わるか
+
+OKなら v1 文法モード完了。
+
+STEP 8：Git コミット ＆ プッシュ
+cd C:\dev\jhs_english_trainer
+git status
+git add .
+git commit -m "Add grammar training v1 (DB, JSON import, service, UI)"
+git push

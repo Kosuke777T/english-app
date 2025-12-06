@@ -1,0 +1,251 @@
+## 0. 前提（今回のオフライン版の共通仕様）
+
+- 会話トレーニング = **シナリオ型テンプレ会話**
+- 英語レベル = **中学レベル（限定語彙＋文法）**
+- 機械学習なし。**ルールベース＋スコアリング**で “AIっぽく” 振る舞う
+
+### 技術前提
+
+- 言語：Python 3.13
+- GUI：PyQt6
+- DB：SQLite3
+- 配布：PyInstaller 等でスタンドアロン exe 化
+    
+    → エンドユーザーに Python のインストールは不要
+    
+
+### データ保存場所
+
+- 学習データ・SQLite DB・設定ファイル：
+    
+    `C:\Users\<User>\AppData\Roaming\<AppName>\data`
+    
+    に保存する。
+    
+    - インストールフォルダ直下には書き込まない（権限対策）
+    - `<AppName>` はアプリ名（例：`JHS_EnglishTrainer`）
+
+### 音声
+
+- 単語および短文の音声再生は Windows 標準の音声合成（SAPI）を利用する
+- Python からは `pywin32` 等で SAPI を呼び出す
+- 外部クラウドTTSサービス（Azure, AWS, Google 等）は使用しない
+
+---
+
+## 1. 会話トレーニング機能の仕様（オフライン・テンプレ会話版）
+
+### 1-1. 目的
+
+- 中学レベルの限定語彙・文法を使って
+    
+    **「よくある場面で使う定番フレーズ」** を身につける
+    
+- 完全自由チャットではなく、
+    
+    **シナリオ（台本）に沿った会話ドリル** として設計する
+    
+
+### 1-2. 画面構成
+
+1. **シチュエーション一覧画面**
+    - タイトル例：
+        - Self Introduction
+        - At School
+        - At a Restaurant
+        - Shopping
+        - Asking for Directions
+    - 各シナリオごとに表示：
+        - タイトル
+        - レベル（中1 / 中2 / 中3）
+        - 進捗（未開始 / 途中 / 完了回数）
+2. **会話画面（シナリオ再生画面）**
+    - 左：会話ログ（吹き出し or チャット風）
+        - 「相手（AI役）」：左側
+        - 「自分」：右側
+    - 右上：シチュエーション名＆アイコン
+    - 右下：ユーザー入力エリア
+        - テキスト入力欄
+        - 送信ボタン
+    - 下部：
+        - 「ヒント」ボタン（日本語＋例文）
+        - 「モデル解答を見る」ボタン
+        - 進行状況バー（step / total）
+
+---
+
+## 2. データ構造（SQLite テーブル設計）
+
+### 2-1. シナリオ定義
+
+### `scenarios` テーブル
+
+- `scenario_id` INTEGER PRIMARY KEY
+- `title` TEXT … 例: "Self Introduction 1"
+- `level` INTEGER … 1=中1, 2=中2, 3=中3
+- `topic_tag` TEXT … "self_intro", "restaurant" など
+- `description` TEXT … シチュエーションの説明
+- `is_active` INTEGER … 1=使用, 0=無効化
+
+### `scenario_steps` テーブル
+
+- `step_id` INTEGER PRIMARY KEY
+- `scenario_id` INTEGER … FK → scenarios
+- `order_no` INTEGER … 1,2,3…
+- `bot_text` TEXT … AI役のセリフ（"Hello! What's your name?"）
+- `expected_patterns` TEXT
+    
+    … JSON文字列（例：`["my name is", "i'm"]`）
+    
+- `required_keywords` TEXT
+    
+    … JSON文字列（例：`["name"]`, `["13", "years old"]`）
+    
+- `hint_jp` TEXT … 日本語ヒント
+- `model_answer` TEXT … 例：「My name is Taro.」
+- `allowed_vocab_set` TEXT
+    
+    … JSON文字列。中学レベル＆このシナリオで使う語彙（制限用、任意）
+    
+
+---
+
+### 2-2. ユーザーごとの会話進捗・ログ
+
+### `conversation_progress`
+
+- `user_id` INTEGER
+- `scenario_id` INTEGER
+- `last_step_order` INTEGER … 最後に到達したステップ番号
+- `cleared_count` INTEGER … 完走回数
+- `last_cleared_at` TEXT … ISO8601 日時
+
+（複合主キー：`user_id + scenario_id`）
+
+### `conversation_log`
+
+- `log_id` INTEGER PRIMARY KEY
+- `user_id` INTEGER
+- `scenario_id` INTEGER
+- `step_id` INTEGER
+- `user_answer` TEXT
+- `judge_result` TEXT … 'full', 'partial', 'fail'
+- `score` INTEGER … 0〜100
+- `answered_at` TEXT … ISO8601 日時
+
+---
+
+## 3. “AIっぽい”判定ロジック（機械学習なし）
+
+### 3-1. ユーザー入力の前処理
+
+ユーザーの英語入力は、以下の処理を行った文字列を判定に使う：
+
+1. 小文字に変換：`"I'm Taro." → "i'm taro."`
+2. 句読点・記号を削除：`, . ? !` など
+3. 連続スペースを1つに統一
+4. 先頭末尾のスペースをトリム
+
+→ `normalized_answer` を作る。
+
+### 3-2. キーワードベースのスコア計算
+
+各 `scenario_steps` に対して：
+
+- `expected_patterns`（例："my name is"）
+- `required_keywords`（例："name", "old", "13"）
+
+を設定しておき、以下のようにスコアリングする。
+
+### スコアリング仕様（例）
+
+> 各ステップで、ユーザー回答のスコア score を0〜100で計算する：
+> 
+> 1. `pattern_score`：
+>     - `expected_patterns` のうち、normalized_answer に含まれているパターン数を数える
+>     - `pattern_hit_ratio = hits / len(expected_patterns)`
+>     - `pattern_score = pattern_hit_ratio * 60`
+> 2. `keyword_score`：
+>     - `required_keywords` のうち、normalized_answer に含まれるキーワード数を数える
+>     - `keyword_hit_ratio = hits / len(required_keywords)`
+>     - `keyword_score = keyword_hit_ratio * 40`
+> 3. `score = pattern_score + keyword_score`
+>     
+>     （上限100）
+>     
+
+### 判定ランク
+
+- `score >= 80` → `'full'`（合格）
+- `50 <= score < 80` → `'partial'`（だいたいOK。訂正を提案）
+- `score < 50` → `'fail'`（やり直し推奨）
+
+---
+
+### 3-3. フィードバックの出し方（AIっぽい振る舞い）
+
+判定ごとに、会話画面でのフィードバックを変える。
+
+- `'full'`：
+    - 「Great!」などのランダムな称賛フレーズ
+    - 次のステップに進む
+- `'partial'`：
+    - 「だいたいOK！」＋「こう言うともっと自然だよ」
+        
+        として `model_answer` を表示
+        
+    - そのまま次のステップに進む or 「もう一度挑戦」ボタンを出す（仕様で選択）
+- `'fail'`：
+    - 「伝わりにくいかも… もう少しこうしてみよう」＋ `hint_jp` を表示
+    - モデル例文 `model_answer` を提示（任意）
+    - 同じステップをもう一度出題
+
+これにより、LLMは使っていなくても
+
+**「答えに合わせてリアクションが変わる“先生っぽさ”** を出せる。
+
+---
+
+## 4. 個人ごとの“AIっぽい”出題調整（会話モード）
+
+機械学習は使わないが、ユーザーごとに以下のような調整を行う。
+
+### 4-1. 難易度の自動調整
+
+`conversation_progress` と `conversation_log` を利用して：
+
+- 同じシナリオで `judge_result='fail'` が多い →
+    
+    そのシナリオをホーム画面で「もう一度やろう」とおすすめ
+    
+- `'full'` が安定して多いシナリオ →
+    
+    より難しいシナリオ（levelが上のもの）を次の候補として提示
+    
+
+仕様イメージ：
+
+> 各 scenario_id について、直近 N 回の会話で
+> 
+> 
+> `fail_ratio = fail_count / total` を計算する。
+> 
+> - `fail_ratio > 0.4` のシナリオ → 「要復習」として優先表示
+> - `fail_ratio < 0.2` かつ `cleared_count >= 3` → 「克服済み」とし、
+>     
+>     次レベルのシナリオをおすすめする。
+>     
+
+### 4-2. ヒント表示の自動ON/OFF
+
+- あるステップで連続して `fail` が続く場合：
+    - 次回そのステップが来たときは、自動的に「ヒント表示ON状態」で開始
+- 安定して `full` なら：
+    - ヒントボタンは押せるが、デフォルトでは非表示
+
+こうして、
+
+> 「この子はここでよくつまずくから、最初からヒント出してあげよう」
+> 
+
+という“気が利いてる感”を出す。

@@ -1,0 +1,60 @@
+[
+  {
+    "grammar_title": "be動詞（現在形）",
+    "question_type": "mcq",
+    "prompt_text": "「私は学生です。」",
+    "choice1": "I is a student.",
+    "choice2": "I am a student.",
+    "choice3": "I are a student.",
+    "choice4": "I be a student.",
+    "correct_answer": "I am a student.",
+    "explanation": "I のときは am を使います。"
+  },
+  {
+    "grammar_title": "be動詞（現在形）",
+    "question_type": "mcq",
+    "prompt_text": "「あなたは先生です。」",
+    "choice1": "You is a teacher.",
+    "choice2": "You am a teacher.",
+    "choice3": "You are a teacher.",
+    "choice4": "You be a teacher.",
+    "correct_answer": "You are a teacher.",
+    "explanation": "You のときは are を使います。"
+  },
+  {
+    "grammar_title": "be動詞（現在形）",
+    "question_type": "fill",
+    "prompt_text": "He ( ) a doctor.",
+    "correct_answer": "is",
+    "explanation": "He のときは is を使います。"
+  },
+  {
+    "grammar_title": "一般動詞（現在形）",
+    "question_type": "mcq",
+    "prompt_text": "「私はテニスをします。」",
+    "choice1": "I play tennis.",
+    "choice2": "I plays tennis.",
+    "choice3": "I playing tennis.",
+    "choice4": "I played tennis.",
+    "correct_answer": "I play tennis.",
+    "explanation": "主語が I のときは動詞は原形を使います。"
+  },
+  {
+    "grammar_title": "三単現",
+    "question_type": "fill",
+    "prompt_text": "She ( ) tennis every day.",
+    "correct_answer": "plays",
+    "explanation": "主語が三人称単数（She）のときは動詞に s を付けます。"
+  }
+]
+
+
+
+
+
+
+
+
+
+
+

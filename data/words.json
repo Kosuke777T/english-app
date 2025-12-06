@@ -1,0 +1,48 @@
+[
+  {
+    "english": "apple",
+    "japanese": "りんご",
+    "grade": 1,
+    "unit": "food",
+    "level": 1
+  },
+  {
+    "english": "book",
+    "japanese": "本",
+    "grade": 1,
+    "unit": "school",
+    "level": 1
+  },
+  {
+    "english": "cat",
+    "japanese": "猫",
+    "grade": 1,
+    "unit": "animals",
+    "level": 1
+  },
+  {
+    "english": "dog",
+    "japanese": "犬",
+    "grade": 1,
+    "unit": "animals",
+    "level": 1
+  },
+  {
+    "english": "hello",
+    "japanese": "こんにちは",
+    "grade": 1,
+    "unit": "greetings",
+    "level": 1
+  }
+]
+
+
+
+
+
+
+
+
+
+
+

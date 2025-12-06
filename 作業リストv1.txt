@@ -1,0 +1,411 @@
+全体ロードマップ（v1）
+
+今回やりたいのはここまで：
+
+開発用フォルダ＆Git 初期化
+
+Python 仮想環境（3.13）＋必要ライブラリ導入
+
+Cursor の基本設定＆使い方整備
+
+仕様書 v1 をもとに最低限のプロジェクト骨組みを作る
+
+GitHub リポジトリ作成＆プッシュ
+
+PowerShell 7 での動作確認用コマンド整備（Here-String＋python -c）
+
+PyInstaller でスタンドアロン exe を作る
+
+他PCに配布できる形（とりあえず zip ／余裕あればインストーラ）
+
+以下、「作業リスト＋Cursorに貼る指示テンプレ」で書いていきます。
+
+作業0：前提確認（パソコンA）
+0-1. 必要なものが入っているか確認
+
+PowerShell 7（pwsh）
+
+Python 3.13
+
+Git
+
+GitHubアカウント
+
+PowerShell 7 で：
+
+pwsh -NoLogo
+$PSVersionTable
+python --version
+git --version
+
+作業1：プロジェクトフォルダ＆Git 初期化
+1-1. フォルダ作成
+
+例として C:\dev\jhs_english_trainer にします。
+
+pwsh -NoLogo
+mkdir C:\dev\jhs_english_trainer
+cd C:\dev\jhs_english_trainer
+
+1-2. Git 初期化
+git init
+git config user.name "あなたの名前"
+git config user.email "あなたのメールアドレス"
+
+1-3. .gitignore 作成を Cursor に頼む
+
+Cursor のチャットに貼る指示例：
+
+プロジェクトは Python 3.13 + PyQt6 で Windows 用デスクトップアプリを作ります。
+フォルダは C:\dev\jhs_english_trainer です。
+
+.gitignore を作ってください。
+
+Python の一般的な無視ファイル
+
+.venv
+
+dist, build, __pycache__, *.spec（PyInstaller 用）
+を含めてください。
+
+生成された .gitignore をプロジェクト直下に保存 → git add .gitignore。
+
+作業2：仮想環境 (.venv) ＋ ライブラリ導入
+2-1. venv 作成＆有効化（PowerShell 7）
+cd C:\dev\jhs_english_trainer
+python -m venv .venv
+. .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+
+2-2. 必須ライブラリインストール
+
+v1 の時点で：
+
+PyQt6（GUI）
+
+pywin32（SAPI TTS）
+
+pytest（任意：テスト）
+
+pyinstaller（後で必要なので今のうちに）
+
+pip install pyqt6 pywin32 pytest pyinstaller
+pip freeze > requirements.txt
+git add requirements.txt
+
+作業3：Cursor の設定・基本の使い方
+3-1. このプロジェクトを Cursor で開く
+
+Cursor を起動
+
+「Open Folder」で C:\dev\jhs_english_trainer を指定
+
+3-2. 推奨設定（ざっくり）
+
+Cursor は VSCode 派生なので、「設定」から：
+
+デフォルトシェルを PowerShell 7 に
+（terminal.integrated.defaultProfile.windows を PowerShell 7 にする）
+
+python.defaultInterpreterPath を
+C:\dev\jhs_english_trainer\.venv\Scripts\python.exe に設定
+
+このあたりは Cursor の設定UIからポチポチでOK。
+（fxbot のときと同じノリで「Pythonのインタープリタ」を .venv に合わせる感じ）
+
+3-3. インストールしておくと楽な拡張
+
+Python（Lint / Intellisense）
+
+Pylance
+
+Git Graph（コミット確認しやすい）
+
+SQLite Viewer（あとでDB中身見る用）
+
+作業4：プロジェクト骨組みを Cursor に作らせる
+4-1. 仕様書 v1 を「仕様ファイル」として保存
+
+docs/spec_v1.md とかに、今までの仕様書（単語・文法・会話・DB仕様など）をコピペして保存。
+
+4-2. プロジェクト構造を生成してもらう
+
+Cursor チャットに貼る指示テンプレ：
+
+このプロジェクトは「中学生向け英語学習ソフト」です。
+仕様書は docs/spec_v1.md に書いてあります。
+
+技術スタックは
+
+Python 3.13
+
+PyQt6
+
+SQLite
+です。
+
+まずは v1 として
+
+ユーザー管理
+
+単語トレーニングモード（日本語→英語スペル、ステージ制）
+
+文法トレーニングモード（トピック一覧＋四択/穴埋めドリル）
+の最小動作を目標にします。
+
+次のフォルダ構成で、空のファイルと最低限の雛形コードを作ってください。
+
+app/__init__.py
+
+app/main.py … PyQt6のエントリーポイント。メインウィンドウ起動
+
+app/ui/main_window.py … メイン画面（タブ：ホーム / 単語 / 文法）
+
+app/ui/ 配下に、モジュールごとの画面クラス
+
+app/services/db.py … SQLite の接続＆初期化（AppData\Roaming<AppName>\data\app.db）
+
+app/services/user_service.py
+
+app/services/word_service.py
+
+app/services/grammar_service.py
+
+app/models/ … pydantic的なデータモデル（必要なら）
+
+また、app/main.py からアプリを起動できるように最低限のコードも書いてください。
+メインウィンドウには「仮のメニューやボタン」だけで構いません。
+
+これで Cursor が骨組み＋最低限起動できるPyQt6アプリを作ってくれます。
+
+4-3. 起動確認
+
+PowerShell 7 で：
+
+cd C:\dev\jhs_english_trainer
+. .\.venv\Scripts\Activate.ps1
+python -m app.main
+
+
+ウィンドウが出ればOK。
+
+作業5：SQLite＆データ保存パスの実装
+5-1. AppData に保存するロジック
+
+Cursorへの指示テンプレ：
+
+app/services/db.py に、SQLite DBを初期化するクラス／関数を実装してください。
+仕様：
+
+Windows 専用で、DBファイルは
+C:\Users\<User>\AppData\Roaming\<AppName>\data\app.db
+に保存する。
+
+<AppName> は "JHSEnglishTrainer" とする。
+
+必要に応じて os.getenv("APPDATA") を利用する。
+
+data フォルダがなければ作成する。
+
+DB接続は sqlite3 標準モジュールで行う。
+
+さらに、初回起動時に以下のテーブルを作成する init_db() 関数を作ってください。
+
+users
+
+words
+
+word_progress
+
+grammar_topics
+
+grammar_questions
+
+grammar_progress
+
+study_sessions
+
+書いてもらったら、python -m app.main 実行時に app.db が作られているか確認。
+
+作業6：GitHub リポジトリとの連携
+6-1. GitHub に空リポジトリ作成
+
+ブラウザで GitHub にログインして、
+jhs_english_trainer（名前はお好み）を作る。
+READMEや.gitignoreはナシでもOK（もうローカルにあるので）。
+
+6-2. ローカルから初回コミット＆プッシュ
+cd C:\dev\jhs_english_trainer
+git status
+git add .
+git commit -m "Initial project structure with PyQt6 skeleton"
+git branch -M main
+git remote add origin https://github.com/<あなたのID>/jhs_english_trainer.git
+git push -u origin main
+
+
+以後は：
+
+作業 → git status → git add → git commit → git push
+
+のループ。
+
+作業7：PowerShell 7＋Here-String でのテストパターン
+
+fxbot でもやっていた形を、このプロジェクト用にも持ってきます。
+
+7-1. 単発テスト用のテンプレ
+
+例：DBのパス確認・初期化テスト。
+
+$code = @'
+from app.services import db
+
+def main() -> None:
+    print("DB path:", db.get_db_path())
+    conn = db.get_connection()
+    print("tables:", list(conn.execute("SELECT name FROM sqlite_master WHERE type='table'")))
+    conn.close()
+
+if __name__ == "__main__":
+    main()
+'@
+
+python -c "$code"
+
+
+この形を多用できるようにしておくと、
+「GUI立ち上げなくても内部ロジックだけテスト」がしやすいです。
+
+PowerShell 7 ならこのスタイルで安定して動きます。
+
+作業8：PyInstaller でスタンドアロン exe 作成
+8-1. エントリーポイントを決める
+
+app/main.py が if __name__ == "__main__": でアプリ起動する形になっているならOK。
+なっていなければ Cursor に直してもらう：
+
+app/main.py を、python -m app.main でも python app/main.py でも動くようにしてください。
+具体的には if __name__ == "__main__": ブロックで main() を呼び出す形にしてください。
+
+8-2. PyInstaller 実行
+
+仮想環境が有効な状態で：
+
+cd C:\dev\jhs_english_trainer
+. .\.venv\Scripts\Activate.ps1
+
+pyinstaller ^
+  --noconsole ^
+  --onefile ^
+  --name JHSEnglishTrainer ^
+  app/main.py
+
+
+成功すると：
+
+dist/JHSEnglishTrainer.exe ができる
+
+8-3. exe の単体テスト
+
+PowerShell 7 で：
+
+cd C:\dev\jhs_english_trainer\dist
+.\JHSEnglishTrainer.exe
+
+
+ウィンドウが出るか
+
+AppData 配下に app.db が作られるか
+
+を確認。
+
+作業9：他PCへのインストール（v1は「zip配布」）
+
+本格インストーラ（Inno Setup / NSIS）は後回しでOK。
+まずは「配布テスト」として、シンプルな形から。
+
+9-1. 配布用フォルダ作成
+cd C:\dev\jhs_english_trainer
+mkdir release
+copy .\dist\JHSEnglishTrainer.exe .\release\
+copy .\LICENSE .\release\  # あれば
+copy .\README.md .\release\  # 簡単な使い方を書いたもの
+
+9-2. zip 化
+Compress-Archive -Path .\release\* -DestinationPath .\JHSEnglishTrainer_v1.zip
+
+
+この zip を 別PC に持っていって解凍 → exe 実行で動けば、
+「Python無しPCでも動く形」が確認できます。
+
+作業10：Cursor を「頭脳役の実行係」として使うコツ
+
+ここからは運用スタイルの話。
+
+10-1. ChatGPT と Cursor の役割分担
+
+ChatGPT（ここ）：
+設計・仕様・アルゴリズム・全体構造を考える頭脳
+
+Cursor：
+「この仕様でコードを書いて」「このファイルを修正して」と実務をお願いする係
+
+10-2. Cursorに投げる指示の典型パターン
+
+「このファイルの中身を書き換えて」系
+
+app/ui/word_training_tab.py を実装してください。
+仕様は docs/spec_v1.md の「単語モード v1」を参照。
+必要な要素：
+
+日本語表示
+
+ステージに応じたヒント
+
+入力欄、判定、結果表示
+
+word_service と連携して出題・記録
+既存のプロジェクト構造を壊さずに実装してください。
+
+「このエラーを直して」系
+
+ターミナルのエラーをそのままコピペして：
+
+python -m app.main を実行したら以下のエラーが出ました。
+どこをどう修正すれば良いか、実際のファイルを書き換える形で直してください。
+（ログここに貼る）
+
+「DB スキーマ修正」系
+
+app/services/db.py の init_db() に、
+会話トレーニング用の scenarios, scenario_steps,
+conversation_progress, conversation_log テーブルを追加してください。
+仕様は docs/spec_v1.md の「会話トレーニング」の章を参照。
+
+10-3. diff をちゃんと確認するクセ
+
+Cursor は一気に複数ファイルを変えるので、
+
+変更プレビューを必ず目視チェック
+
+意図と違えば「Undo this change」と戻す
+
+このクセだけつけておけば、事故が減ります。
+
+ここまでのまとめ
+
+仕様書 v1 を「docs/spec_v1.md」に固定
+
+プロジェクトルート C:\dev\jhs_english_trainer
+
+Python 3.13 + PyQt6 + SQLite + pywin32
+
+PowerShell 7 ＋ Here-String でテストしながら開発
+
+Cursor でプロジェクト骨組み → 画面／サービス／DB を一つずつ実装
+
+GitHub に同期しつつ、PyInstaller で exe 化
+
+v1 は zip 配布（dist の exe を梱包）
+

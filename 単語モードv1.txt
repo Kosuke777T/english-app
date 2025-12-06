@@ -1,0 +1,507 @@
+全体の流れ（単語モード v1）
+
+DBスキーマに単語関連テーブルを追加
+
+単語マスタ（words.json）を用意してDBに流し込むスクリプトを作る
+
+word_service に出題＆復習ロジック（ステージ＋優先度）を実装
+
+tts_service（SAPIラッパー）を作る
+
+PyQt6 の単語トレーニングタブを実装して main_window に組み込む
+
+PowerShell＋Here-String でサービス層の動作確認
+
+アプリ全体で「1ユーザーだけでも単語練習できる」状態にする
+
+Git コミット & GitHub にプッシュ
+
+以下、ステップごとに「やること」と「Cursorに貼る指示テンプレ」を書く。
+
+STEP 1：単語テーブル＆進捗テーブル追加
+1-1. DBスキーマにテーブル追加
+
+やること：
+
+app/services/db.py の init_db() に以下のテーブルを追加：
+
+words
+
+word_progress
+
+（ついでに study_sessions も定義だけしておいてOK）
+
+Cursorへの指示テンプレ：
+
+ファイル app/services/db.py を修正してください。
+仕様：
+
+SQLite DB は C:\Users\<User>\AppData\Roaming\JHSEnglishTrainer\data\app.db に保存されます。
+
+既に DB 接続やパス取得の処理があれば流用してください。
+
+init_db() 関数に、以下のテーブルを作成する SQL を追加してください（存在しなければ作成、あれば何もしない形）。
+
+words
+
+words(
+  word_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  english      TEXT NOT NULL,
+  japanese     TEXT NOT NULL,
+  grade        INTEGER,      -- 中1=1, 中2=2, 中3=3
+  unit         TEXT,         -- 教科書ユニットなど
+  level        INTEGER,      -- 難易度(1〜5くらい)
+  created_at   TEXT          -- ISO8601文字列
+);
+
+
+word_progress
+
+word_progress(
+  user_id              INTEGER NOT NULL,
+  word_id              INTEGER NOT NULL,
+  stage                INTEGER NOT NULL DEFAULT 1,  -- 1〜4
+  total_correct        INTEGER NOT NULL DEFAULT 0,
+  total_wrong          INTEGER NOT NULL DEFAULT 0,
+  correct_streak       INTEGER NOT NULL DEFAULT 0,
+  avg_answer_time_sec  REAL    NOT NULL DEFAULT 0,
+  last_answered_at     TEXT,
+  PRIMARY KEY(user_id, word_id)
+);
+
+
+study_sessions（単語モードで使う前提の定義だけ）
+
+study_sessions(
+  session_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL,
+  date          TEXT    NOT NULL,
+  mode          TEXT    NOT NULL,  -- 'word'
+  duration_sec  INTEGER NOT NULL DEFAULT 0,
+  correct_count INTEGER NOT NULL DEFAULT 0,
+  wrong_count   INTEGER NOT NULL DEFAULT 0
+);
+
+
+可能であればトランザクションでまとめて実行してください。
+
+これで DB 側の土台ができる。
+
+STEP 2：単語マスタ用 JSON ＋ インポートスクリプト
+2-1. data/words.json の雛形を作る
+
+やること：
+
+data/words.json を作り、最低限10〜20語くらいのサンプルを入れる。
+
+ChatGPTに単語リストを作ってもらってもOK。
+
+フォーマット例：
+
+[
+  {
+    "english": "apple",
+    "japanese": "りんご",
+    "grade": 1,
+    "unit": "food",
+    "level": 1
+  },
+  {
+    "english": "school",
+    "japanese": "学校",
+    "grade": 1,
+    "unit": "school",
+    "level": 1
+  }
+]
+
+2-2. JSON→SQLiteインポートスクリプト
+
+やること：
+
+scripts/import_words_from_json.py を作る
+
+data/words.json を読み込み、words テーブルにINSERTする
+
+Cursorへの指示テンプレ：
+
+プロジェクトに scripts/import_words_from_json.py を追加してください。
+仕様：
+
+ルートディレクトリに data/words.json がある前提です。
+
+JSONフォーマットは以下の形：
+
+[
+  {"english": "...", "japanese": "...", "grade": 1, "unit": "food", "level": 1},
+  ...
+]
+
+
+app/services/db.py の DB 接続関数を再利用してください。
+
+既に同じ english の単語が登録されている場合はスキップするか上書きするか、どちらでも良いですが、コード内で明示してください。
+
+コマンドラインから
+
+python -m scripts.import_words_from_json
+
+
+で実行できるようにしてください。
+
+実行：
+
+. .\.venv\Scripts\Activate.ps1
+python -m scripts.import_words_from_json
+
+STEP 3：word_service に出題＆復習ロジックを実装
+3-1. サービスファイルの骨組み
+
+やること：
+
+app/services/word_service.py を作成
+
+次のような関数のインターフェースだけ決める：
+
+get_next_word(user_id: int) -> WordQuestion
+
+record_answer(user_id: int, word_id: int, is_correct: bool, answer_time_sec: float)
+
+update_stage_and_stats(...)（内部用）
+
+compute_priority(...)（内部用）
+
+3-2. 優先度スコアの仕様
+
+仕様としては、以前話したやつをそのまま実装してもらう：
+
+priority =
+
+間違い回数が多いほど↑
+
+連続正解が少ないほど↑
+
+最後に解いた日からの経過が長いほど↑
+
+ステージが低いほど↑
+
+具体例（Cursorに渡す用）：
+
+days = max(1, 今日 - last_answered_at(日数))
+
+priority =
+    wrong_count * 3
+  + (1 / max(1, correct_streak)) * 4
+  + days * 1.5
+  + stage_penalty
+
+stage_penalty:
+  stage 1 → +5
+  stage 2 → +3
+  stage 3 → +1
+  stage 4 → +0
+
+3-3. ステージ昇格・降格ルール
+
+仕様（そのままCursorに渡せる形）：
+
+stage1 → 2：
+
+連続正解2回以上
+
+stage2 → 3：
+
+連続正解3回以上 ＆ 平均回答時間 ≤ 5秒
+
+stage3 → 4：
+
+連続正解3回以上
+
+ミスしたとき：
+
+correct_streak = 0
+
+stage = max(1, stage - 1)
+
+3-4. Cursorへの指示テンプレ（word_service）
+
+app/services/word_service.py を実装してください。
+仕様は以下のとおりです：
+
+DBテーブル words, word_progress を使って、
+単語出題と学習履歴管理を行います。
+
+次の関数を実装してください：
+
+get_next_word(user_id: int) -> dict
+
+指定ユーザーについて、word_progress と words をJOINして
+各単語ごとの priority を計算し、もっとも優先度の高い単語1件を返す。
+
+戻り値は
+{"word_id": int, "english": str, "japanese": str, "stage": int}
+のような dict で良いです。
+
+まだ word_progress に存在しない単語については、
+stage=1 などの初期値で扱ってください。
+
+record_answer(user_id: int, word_id: int, is_correct: bool, answer_time_sec: float) -> None
+
+word_progress の該当レコードを読み込み、
+total_correct, total_wrong, correct_streak,
+avg_answer_time_sec, last_answered_at, stage を更新してください。
+
+ステージ昇格・降格ルールは次を用いてください：
+
+正解のとき：
+
+total_correct++
+
+correct_streak++
+
+平均回答時間を移動平均で更新
+
+条件：
+
+stage1 → 2：連続正解2回以上
+
+stage2 → 3：連続正解3回以上 かつ avg_answer_time_sec <= 5
+
+stage3 → 4：連続正解3回以上
+
+不正解のとき：
+
+total_wrong++
+
+correct_streak = 0
+
+stage = max(1, stage - 1)
+
+last_answered_at は現在時刻のISO8601文字列としてください。
+
+優先度スコア priority は以下の式を実装してください：
+
+days = max(1, 今日 - last_answered_at(日数))（nullの場合は大きめの値に扱う）
+
+priority = wrong_count * 3 + (1 / max(1, correct_streak)) * 4 + days * 1.5 + stage_penalty
+
+stage_penalty: stage1→+5, stage2→+3, stage3→+1, stage4→+0
+
+必要であれば小さなヘルパー関数や WordProgress 風のクラスを追加して構いません。
+
+STEP 4：tts_service（SAPIラッパー）を作る
+
+やること：
+
+app/services/tts_service.py を作成
+
+単純に speak(text: str) を1つ実装
+
+Cursorへの指示テンプレ：
+
+app/services/tts_service.py を追加してください。
+仕様：
+
+Windows専用の TTS として SAPI を使用します。
+
+Python からは pywin32 の win32com.client を使ってください。
+
+関数 speak(text: str) -> None を実装し、
+渡された英単語や短文を非同期ではなく「その場で」読み上げてください。
+
+内部で Dispatch("SAPI.SpVoice") を使い、毎回新規生成でも構いません。
+
+エラー時は例外を握りつぶして何もしない実装でも構いません（v1では）。
+
+後で UI から tts_service.speak(word) を呼べばOK。
+
+STEP 5：PyQt6 単語トレーニングタブの実装
+5-1. UIクラスのファイル作成
+
+やること：
+
+app/ui/word_training_tab.py を作成
+
+メインウィンドウからタブとして読み込む
+
+5-2. 画面要素（最小限）
+
+日本語の意味ラベル
+
+ステージ別ヒントラベル（全文／バラバラ文字／なし／「音声のみ」表示）
+
+入力欄（QLineEdit）
+
+「答え合わせ」ボタン
+
+結果表示ラベル（正解／不正解、正解スペル表示）
+
+「次の単語へ」ボタン
+
+（任意）現在のステージ＆連続正解数ラベル
+
+5-3. ステージごとの表示ルール
+
+stage1：
+
+english をそのままヒントに表示（例：apple）
+
+stage2：
+
+english の文字をランダムに並べ替えた文字列をヒントに表示（p a e p l）
+
+stage3：
+
+ヒント非表示（空欄）
+
+stage4：
+
+english は画面に出さない
+→ 代わりに tts_service.speak(english) を自動再生 or 再生ボタン
+
+5-4. Cursorへの指示テンプレ（UI）
+
+app/ui/word_training_tab.py を実装してください。
+仕様：
+
+PyQt6 の QWidget を継承した WordTrainingTab クラスを作成します。
+
+コンストラクタで user_id: int を受け取る想定としてください。
+
+画面要素：
+
+日本語の意味を表示するラベル（例：「りんご」）
+
+ステージに応じたヒントラベル（全文／バラバラ文字／なし／「音声のみ」）
+
+単語入力用の QLineEdit
+
+「答え合わせ」ボタン
+
+結果表示ラベル（正解、不正解、正解スペルなど）
+
+「次の単語」ボタン
+
+内部で word_service.get_next_word(user_id) を呼び出して出題し、
+
+stage1：英単語全文をヒント欄に表示
+
+stage2：英単語の文字をランダムシャッフルしてヒント欄に表示
+
+stage3：ヒント欄は空
+
+stage4：ヒント欄に「音声のみ」と表示し、
+出題時に tts_service.speak(english) を呼び出す
+
+「答え合わせ」ボタン押下時：
+
+入力値と英単語を比較し、完全一致なら正解とする。
+
+正解／不正解を画面に表示し、
+word_service.record_answer(user_id, word_id, is_correct, answer_time_sec)
+を呼び出して進捗を更新する。
+
+正解時には tts_service.speak(english) を呼び出して音声再生する。
+
+「次の単語」ボタン押下で、再度 get_next_word を呼び出して新しい問題に切り替える。
+
+例外発生時は、とりあえずメッセージラベルにエラーメッセージを表示する程度で構いません（v1）。
+
+5-5. メインウィンドウへの組み込み
+
+やること：
+
+app/ui/main_window.py のタブ構成に「単語」タブを追加
+
+current_user_id を仮に 1 と決め打ちでもOK（ユーザー管理がまだなら）
+
+Cursorへの指示テンプレ：
+
+app/ui/main_window.py を修正して、
+QTabWidget に「単語トレーニング」タブを追加してください。
+仕様：
+
+まだユーザー管理画面が未実装の場合は、仮に user_id = 1 として
+WordTrainingTab(user_id=1) を生成してタブに追加してください。
+
+すでにユーザー管理がある場合は、適切に選択中ユーザーIDを渡す設計にして構いません。
+
+STEP 6：PowerShell＋Here-String でサービス層テスト
+
+GUIを動かす前に、中身だけテストする。
+
+6-1. get_next_word の動作確認
+. .\.venv\Scripts\Activate.ps1
+$code = @'
+from app.services import db, word_service
+
+def main() -> None:
+    # 仮ユーザーID 1
+    user_id = 1
+
+    # DB 初期化（必要なら）
+    db.init_db()
+
+    # 次の単語を取得
+    word = word_service.get_next_word(user_id)
+    print("next word:", word)
+
+if __name__ == "__main__":
+    main()
+'@
+
+python -c "$code"
+
+
+次の単語が dict で表示されればOK。
+
+6-2. record_answer テスト
+$code = @'
+from app.services import db, word_service
+
+def main() -> None:
+    user_id = 1
+    db.init_db()
+    word = word_service.get_next_word(user_id)
+    print("before:", word)
+    # 正解したという想定で記録
+    word_service.record_answer(user_id, word["word_id"], True, 3.5)
+    # 再度取得
+    word2 = word_service.get_next_word(user_id)
+    print("after:", word2)
+
+if __name__ == "__main__":
+    main()
+'@
+
+python -c "$code"
+
+
+エラーが出なければOK。
+細かい挙動（ステージやpriority）はあとで調整。
+
+STEP 7：アプリとして一連の流れを確認
+
+仮ユーザー（ID=1）前提で実行
+
+. .\.venv\Scripts\Activate.ps1
+python -m app.main
+
+
+単語タブを開く
+
+「次の単語」ボタンで問題を表示
+
+入力 → 答え合わせ → 音声再生 → 次の単語…
+
+ここまで動けば「単語モード v1（最小限）」達成。
+
+STEP 8：Git コミット & プッシュ
+
+最後に：
+
+cd C:\dev\jhs_english_trainer
+git status
+git add .
+git commit -m "Add word training v1 (DB, service, UI, TTS)"
+git push
