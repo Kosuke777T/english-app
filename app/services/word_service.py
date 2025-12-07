@@ -1,8 +1,10 @@
 """
 単語出題・判定・ステージ管理サービス
+仕様: docs/spec_v1.md の単語モードに従う
 """
 from datetime import datetime, date
 import random
+import sqlite3
 from app.services import db
 
 
@@ -19,24 +21,30 @@ def get_next_word(user_id: int = 1) -> dict:
     conn = db.get_connection()
     cursor = conn.cursor()
     
-    # 全単語とその進捗を取得
-    cursor.execute("""
-        SELECT 
-            w.word_id,
-            w.english,
-            w.japanese,
-            COALESCE(wp.stage, 1) as stage,
-            COALESCE(wp.total_correct, 0) as total_correct,
-            COALESCE(wp.total_wrong, 0) as total_wrong,
-            COALESCE(wp.correct_streak, 0) as correct_streak,
-            COALESCE(wp.avg_answer_time_sec, 0.0) as avg_answer_time_sec,
-            wp.last_answered_at
-        FROM words w
-        LEFT JOIN word_progress wp ON w.word_id = wp.word_id AND wp.user_id = ?
-        ORDER BY w.word_id
-    """, (user_id,))
+    try:
+        # 全単語とその進捗を取得
+        cursor.execute("""
+            SELECT 
+                w.word_id,
+                w.english,
+                w.japanese,
+                COALESCE(wp.stage, 1) as stage,
+                COALESCE(wp.total_correct, 0) as total_correct,
+                COALESCE(wp.total_wrong, 0) as total_wrong,
+                COALESCE(wp.correct_streak, 0) as correct_streak,
+                COALESCE(wp.avg_answer_time_sec, 0.0) as avg_answer_time_sec,
+                wp.last_answered_at
+            FROM words w
+            LEFT JOIN word_progress wp ON w.word_id = wp.word_id AND wp.user_id = ?
+            ORDER BY w.word_id
+        """, (user_id,))
+        
+        words = cursor.fetchall()
+    except sqlite3.OperationalError as e:
+        # テーブルが存在しない場合
+        conn.close()
+        raise RuntimeError(f"データベーステーブルが存在しません。先にデータをインポートしてください: {e}")
     
-    words = cursor.fetchall()
     if not words:
         conn.close()
         return None
@@ -120,14 +128,19 @@ def record_answer(user_id: int, word_id: int, is_correct: bool, answer_time_sec:
     conn = db.get_connection()
     cursor = conn.cursor()
     
-    # 現在の進捗を取得
-    cursor.execute("""
-        SELECT stage, total_correct, total_wrong, correct_streak, avg_answer_time_sec
-        FROM word_progress
-        WHERE user_id = ? AND word_id = ?
-    """, (user_id, word_id))
-    
-    progress = cursor.fetchone()
+    try:
+        # 現在の進捗を取得
+        cursor.execute("""
+            SELECT stage, total_correct, total_wrong, correct_streak, avg_answer_time_sec
+            FROM word_progress
+            WHERE user_id = ? AND word_id = ?
+        """, (user_id, word_id))
+        
+        progress = cursor.fetchone()
+    except sqlite3.OperationalError as e:
+        # テーブルが存在しない場合
+        conn.close()
+        raise RuntimeError(f"データベーステーブルが存在しません。先にデータをインポートしてください: {e}")
     
     if progress:
         stage = progress['stage']
@@ -147,22 +160,33 @@ def record_answer(user_id: int, word_id: int, is_correct: bool, answer_time_sec:
         total_correct += 1
         correct_streak += 1
         
-        # 平均回答時間を更新
+        # 平均回答時間を更新（ステージ昇格条件には使わないが、記録は継続）
         if total_correct == 1:
             avg_time = answer_time_sec
         else:
             avg_time = (avg_time * (total_correct - 1) + answer_time_sec) / total_correct
         
-        # ステージ昇格判定
-        if stage == 1 and correct_streak >= 2:
+        # ステージ昇格判定（新仕様）
+        # stage 1 → 2: 1回正解で昇格
+        # stage 2 → 3: 2回連続正解で昇格
+        # stage 3 → 4: 3回連続正解で昇格
+        if stage == 1 and correct_streak >= 1:
             stage = 2
-        elif stage == 2 and correct_streak >= 3 and avg_time <= 5.0:
+            correct_streak = 0  # 新しいステージに入ったのでリセット
+        elif stage == 2 and correct_streak >= 2:
             stage = 3
+            correct_streak = 0  # 新しいステージに入ったのでリセット
         elif stage == 3 and correct_streak >= 3:
+            stage = 4
+            correct_streak = 0  # 新しいステージに入ったのでリセット
+        
+        # 上限チェック（念のため）
+        if stage > 4:
             stage = 4
     else:
         total_wrong += 1
         correct_streak = 0
+        # ステージ降格（既存仕様を維持）
         stage = max(1, stage - 1)
     
     # 進捗を更新または挿入

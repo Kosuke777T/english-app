@@ -14,8 +14,9 @@ from app.services import db
 class GrammarTrainingTab(QWidget):
     """文法トレーニング画面"""
     
-    def __init__(self):
+    def __init__(self, user_id: int = 1):
         super().__init__()
+        self.user_id = user_id
         self.current_topic_id = None
         self.current_question = None
         self.button_group = None
@@ -130,7 +131,7 @@ class GrammarTrainingTab(QWidget):
             return
         
         self.current_question = grammar_service.get_next_question(
-            user_id=1,
+            user_id=self.user_id,
             grammar_id=self.current_topic_id
         )
         
@@ -192,7 +193,7 @@ class GrammarTrainingTab(QWidget):
         
         # 採点
         result = grammar_service.check_answer(
-            user_id=1,
+            user_id=self.user_id,
             question_id=self.current_question['question_id'],
             answer=user_answer
         )
