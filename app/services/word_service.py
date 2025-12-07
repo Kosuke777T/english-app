@@ -8,22 +8,56 @@ import sqlite3
 from app.services import db
 
 
-def get_next_word(user_id: int = 1) -> dict:
+def get_next_word(
+    user_id: int = 1,
+    grade_min: int | None = None,
+    grade_max: int | None = None,
+    unit: str | None = None,
+    level_max: int | None = None,
+) -> dict | None:
     """
     次の出題単語を取得（優先度スコアに基づく）
     
     Args:
         user_id: ユーザーID（デフォルト: 1）
+        grade_min: 最小学年（None の場合は制限なし）
+        grade_max: 最大学年（None の場合は制限なし）
+        unit: ユニット名（None の場合は制限なし）
+        level_max: 最大レベル（None の場合は制限なし）
     
     Returns:
-        単語情報とステージ情報を含む辞書
+        単語情報とステージ情報を含む辞書、該当単語がなければ None
     """
     conn = db.get_connection()
     cursor = conn.cursor()
     
     try:
+        # WHERE句を構築
+        where_conditions = []
+        params = [user_id]
+        
+        if grade_min is not None:
+            where_conditions.append("w.grade >= ?")
+            params.append(grade_min)
+        
+        if grade_max is not None:
+            where_conditions.append("w.grade <= ?")
+            params.append(grade_max)
+        
+        if unit is not None:
+            where_conditions.append("w.unit = ?")
+            params.append(unit)
+        
+        if level_max is not None:
+            where_conditions.append("w.level <= ?")
+            params.append(level_max)
+        
+        where_clause = ""
+        if where_conditions:
+            where_clause = "WHERE " + " AND ".join(where_conditions)
+        
         # 全単語とその進捗を取得
-        cursor.execute("""
+        query = f"""
             SELECT 
                 w.word_id,
                 w.english,
@@ -36,8 +70,11 @@ def get_next_word(user_id: int = 1) -> dict:
                 wp.last_answered_at
             FROM words w
             LEFT JOIN word_progress wp ON w.word_id = wp.word_id AND wp.user_id = ?
+            {where_clause}
             ORDER BY w.word_id
-        """, (user_id,))
+        """
+        
+        cursor.execute(query, tuple(params))
         
         words = cursor.fetchall()
     except sqlite3.OperationalError as e:

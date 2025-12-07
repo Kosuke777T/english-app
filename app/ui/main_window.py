@@ -94,15 +94,23 @@ class MainWindow(QMainWindow):
         
         # タブ切り替え時に単語モードタブが表示されたら入力欄にフォーカス
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self._last_tab = None
     
     def _on_tab_changed(self, index: int):
         """タブが切り替わったときに呼ばれる"""
-        # 単語トレーニングタブが表示された場合（インデックス1）
-        if index == 1 and hasattr(self, 'word_tab'):
-            # 単語タブが選択されたので、WordTrainingTab に通知
-            self.word_tab.on_activated()
+        new_tab = self.tabs.widget(index)
+        
+        # 前のタブに on_deactivated を通知（あれば）
+        if self._last_tab is not None and hasattr(self._last_tab, "on_deactivated"):
+            self._last_tab.on_deactivated()
+        
+        # 新しいタブが WordTrainingTab なら on_activated を呼ぶ
+        if new_tab is self.word_tab and hasattr(new_tab, "on_activated"):
+            new_tab.on_activated()
             # 少し遅延を入れてフォーカスを設定（タブ切り替えのアニメーション完了後）
             QTimer.singleShot(100, lambda: self.word_tab.input_field.setFocus())
+        
+        self._last_tab = new_tab
     
     def change_user(self):
         """ユーザー選択ダイアログを開く"""
@@ -137,7 +145,8 @@ class MainWindow(QMainWindow):
         # 現在単語モードタブが表示されている場合はフォーカスを設定
         if self.tabs.currentIndex() == 1:
             # 単語タブが選択されているので、WordTrainingTab に通知
-            self.word_tab.on_activated()
+            if hasattr(self.word_tab, "on_activated"):
+                self.word_tab.on_activated()
             QTimer.singleShot(100, lambda: self.word_tab.input_field.setFocus())
 
 
