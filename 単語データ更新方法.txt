@@ -1,0 +1,24 @@
+cd D:\english
+. .\.venv\Scripts\Activate.ps1
+
+$code = @'
+from app.services import db
+
+def main():
+    conn = db.get_connection()
+    # 進捗を先に削除
+    conn.execute("DELETE FROM word_progress")
+    # 単語マスタを削除
+    conn.execute("DELETE FROM words")
+    conn.commit()
+    conn.close()
+    print("words / word_progress を全削除しました。")
+
+if __name__ == "__main__":
+    main()
+'@
+
+python -c "$code"
+
+# そのあとでもう一度インポート
+python -m scripts.import_words_from_json
