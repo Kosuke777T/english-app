@@ -44,6 +44,8 @@ class WordTrainingTab(QWidget):
         self.init_ui(saved_voice)
         # 初回出題は行わない（スタートボタンが押されるまで待つ）
         self._disable_ui()
+        # 統計情報を初期表示
+        self._update_stats()
         
         # ステージ4の音声再生用タイマー（必要に応じてキャンセル可能にするため）
         self._stage4_audio_timer = None
@@ -148,7 +150,10 @@ class WordTrainingTab(QWidget):
         
         layout.addLayout(streak_layout)
         
-        # ★ フィルタUI
+        # ★ フィルタUIと進捗表示を横並びに配置
+        bottom_layout = QHBoxLayout()
+        
+        # ★ フィルタUI（左側）
         filter_layout = QVBoxLayout()
         
         # 学年フィルタ
@@ -225,7 +230,32 @@ class WordTrainingTab(QWidget):
         stage_mode_layout.addStretch()
         filter_layout.addLayout(stage_mode_layout)
         
-        layout.addLayout(filter_layout)
+        bottom_layout.addLayout(filter_layout)
+        
+        # ★ 進捗表示（右側）
+        bottom_layout.addSpacing(30)
+        progress_layout = QVBoxLayout()
+        
+        # 進捗表示用ラベル4つを作成
+        self.label_total_words = QLabel("登録単語数: 0")
+        self.label_stage1 = QLabel("Stage1クリア率: 0.0%")
+        self.label_stage2 = QLabel("Stage2クリア率: 0.0%")
+        self.label_stage3 = QLabel("Stage3クリア率: 0.0%")
+        
+        # フォントを大きく太字に設定
+        progress_font = QFont()
+        progress_font.setPointSize(20)
+        progress_font.setBold(True)
+        
+        for label in [self.label_total_words, self.label_stage1, self.label_stage2, self.label_stage3]:
+            label.setFont(progress_font)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            progress_layout.addWidget(label)
+        
+        bottom_layout.addLayout(progress_layout)
+        bottom_layout.addStretch()
+        
+        layout.addLayout(bottom_layout)
         
         layout.addStretch()
         self.setLayout(layout)
@@ -375,6 +405,9 @@ class WordTrainingTab(QWidget):
         self.question_counter += 1
         self.question_label.setText(f"第 {self.question_counter} 問")
         
+        # ★ 統計情報を更新
+        self._update_stats()
+        
         # ★ 一瞬だけハイライトして「次の問題になった」ことを視覚的に見せる
         normal_style = "font-size: 14px;"
         highlight_style = "font-size: 14px; background-color: #FFFACD;"  # 薄い黄色
@@ -443,7 +476,7 @@ class WordTrainingTab(QWidget):
             QApplication.processEvents()
             
             # ★(5) その後に重い処理（DB書き込み）
-            word_service.record_answer(
+            word_service.record_result(
                 user_id=self.user_id,
                 word_id=self.current_word['word_id'],
                 is_correct=True,
@@ -462,7 +495,7 @@ class WordTrainingTab(QWidget):
             QApplication.processEvents()
             
             # その後に重い処理（DB書き込み）
-            word_service.record_answer(
+            word_service.record_result(
                 user_id=self.user_id,
                 word_id=self.current_word['word_id'],
                 is_correct=False,
@@ -598,6 +631,25 @@ class WordTrainingTab(QWidget):
         self._enable_ui()
         self.load_next_word()
         self.input_field.setFocus()
+    
+    def _update_stats(self):
+        """統計情報を更新"""
+        try:
+            stats = word_service.get_word_stats(self.user_id)
+            total = stats.get("total_words", 0)
+            s1_pct = stats.get("stage1_cleared_pct", 0.0)
+            s2_pct = stats.get("stage2_cleared_pct", 0.0)
+            s3_pct = stats.get("stage3_cleared_pct", 0.0)
+            self.label_total_words.setText(f"登録単語数: {total}")
+            self.label_stage1.setText(f"Stage1クリア率: {s1_pct}%")
+            self.label_stage2.setText(f"Stage2クリア率: {s2_pct}%")
+            self.label_stage3.setText(f"Stage3クリア率: {s3_pct}%")
+        except Exception as e:
+            # エラーが発生した場合はデフォルト値を表示
+            self.label_total_words.setText("登録単語数: 0")
+            self.label_stage1.setText("Stage1クリア率: 0.0%")
+            self.label_stage2.setText("Stage2クリア率: 0.0%")
+            self.label_stage3.setText("Stage3クリア率: 0.0%")
 
 
 
