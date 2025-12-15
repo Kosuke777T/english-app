@@ -125,28 +125,19 @@ def get_next_word(
     if top_n > 0:
         selected = random.choice(word_scores[:top_n])[1]
     else:
-        # フォールバック（万一候補ゼロならwords全体からランダムで1件）
-        fallback_query = f"""
-            SELECT 
-                w.word_id,
-                w.english,
-                w.japanese,
-                COALESCE(wp.stage, 1) as stage,
-                COALESCE(wp.total_correct, 0) as total_correct,
-                COALESCE(wp.total_wrong, 0) as total_wrong,
-                COALESCE(wp.correct_streak, 0) as correct_streak,
-                COALESCE(wp.avg_answer_time_sec, 0.0) as avg_answer_time_sec,
-                wp.last_answered_at
-            FROM words w
-            LEFT JOIN word_progress wp ON w.word_id = wp.word_id AND wp.user_id = ?
-            {where_clause}
-            ORDER BY RANDOM()
-            LIMIT 1
-        """
-        cursor.execute(fallback_query, tuple(params))
+        # フォールバック（万一候補ゼロなら完全ランダムで1件）
+        cursor.execute("SELECT word_id, english, japanese FROM words ORDER BY RANDOM() LIMIT 1")
         fallback_row = cursor.fetchone()
         if fallback_row:
-            selected = fallback_row
+            # フォールバック用の辞書形式に変換
+            selected = {
+                'word_id': fallback_row['word_id'],
+                'english': fallback_row['english'],
+                'japanese': fallback_row['japanese'],
+                'stage': 1,
+                'correct_streak': 0,
+                'avg_answer_time_sec': 0.0
+            }
         else:
             conn.close()
             return None
@@ -317,94 +308,6 @@ def get_word_stats(user_id: int) -> dict:
             conn.close()
         except Exception:
             pass
-
-
-def record_result(
-    user_id: int,
-    word_id: int,
-    is_correct: bool,
-    answer_time_sec: float | None = None,
-) -> None:
-    """
-    単語の回答結果を word_progress に記録する。
-    - 初回は INSERT（stage=1）
-    - 正解なら stage を +1（最大4）
-    - total_correct/total_wrong, correct_streak, avg_answer_time_sec, last_answered_at を更新
-    """
-    con = db.get_connection()
-    try:
-        cur = con.cursor()
-
-        # 既存レコード取得
-        row = cur.execute(
-            """
-            SELECT stage, total_correct, total_wrong, correct_streak, avg_answer_time_sec
-            FROM word_progress
-            WHERE user_id=? AND word_id=?
-            """,
-            (user_id, word_id),
-        ).fetchone()
-
-        if row is None:
-            stage = 1
-            total_correct = 0
-            total_wrong = 0
-            correct_streak = 0
-            avg_time = 0.0
-
-            cur.execute(
-                """
-                INSERT INTO word_progress(
-                    user_id, word_id, stage, total_correct, total_wrong,
-                    correct_streak, avg_answer_time_sec, last_answered_at
-                )
-                VALUES(?, ?, 1, 0, 0, 0, 0.0, datetime('now','localtime'))
-                """,
-                (user_id, word_id),
-            )
-        else:
-            # sqlite3.Row でも tuple でもOKなように index で読む
-            stage = int(row[0] or 1)
-            total_correct = int(row[1] or 0)
-            total_wrong = int(row[2] or 0)
-            correct_streak = int(row[3] or 0)
-            avg_time = float(row[4] or 0.0)
-
-        # 更新値を計算
-        if is_correct:
-            total_correct += 1
-            correct_streak += 1
-            stage = min(stage + 1, 4)
-        else:
-            total_wrong += 1
-            correct_streak = 0
-            # 不正解でstageを下げたいならここで調整（今は据え置き）
-
-        if answer_time_sec is not None:
-            # シンプルに移動平均（重み付き）にする：新しい値を10%反映
-            try:
-                t = max(0.0, float(answer_time_sec))
-            except Exception:
-                t = 0.0
-            avg_time = (avg_time * 0.9) + (t * 0.1)
-
-        cur.execute(
-            """
-            UPDATE word_progress
-            SET stage=?,
-                total_correct=?,
-                total_wrong=?,
-                correct_streak=?,
-                avg_answer_time_sec=?,
-                last_answered_at=datetime('now','localtime')
-            WHERE user_id=? AND word_id=?
-            """,
-            (stage, total_correct, total_wrong, correct_streak, avg_time, user_id, word_id),
-        )
-
-        con.commit()
-    finally:
-        con.close()
 
 
 
